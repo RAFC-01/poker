@@ -13,16 +13,26 @@ const io = new Server(server, {
 });
 
 const players = [];
+let currentPlayerTurnId;
+let gameInProgress = false;
 
 io.on("connection", (socket) => {
     console.log("user connected: ", socket.id);
     socket.player = {
         id: socket.id,
         timeJoined: Date.now(),
-        bet: {}
+        hasFolded: false,
+        bet: {
+            1000: 0,
+            500: 0,
+            250: 0,
+            100: 0
+        }
     };
     socket.secretInfo = {};
     players.push(socket.player);
+    if (!currentPlayerTurnId) currentPlayerTurnId = socket.id;
+    io.emit("currentTurn", currentPlayerTurnId);
     socket.on('getHand', (data, callback) => {
         socket.player.money = 5000;
         const userCards = getCards(2);
@@ -38,12 +48,12 @@ io.on("connection", (socket) => {
         if (betAmm < socket.player.money){
             socket.player.money -= betAmm;
             correctBet = betAmm;
-            if (!socket.player.bet[betAmm]) socket.player.bet[betAmm] = 4;
-            else socket.player.bet[betAmm]+=4;
+            socket.player.bet = correctBet;
             socket.broadcast.emit("userJoin", players);
+            gameInProgress = true;
         }
         callback({newMoney: socket.player.money, bet: correctBet});
-    })
+    });
     socket.on('disconnect', () => { 
         console.log('user disconnected: ', socket.id);
         const playerIndex = getPlayerByID(socket.id);

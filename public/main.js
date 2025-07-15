@@ -11,6 +11,7 @@ const loadedImages = {};
 let scale = 3;
 
 let testCard;
+let dt;
 
 const CARD_HEART = 0;
 const CARD_DIAMOND = 1;
@@ -32,31 +33,38 @@ const player = {
 const chipPositions = {
     1000: {x: 48, y: 64},
     500: {x: 64, y: 64},
+    250: {x: 80, y: 64},
+    100: {x: 96, y: 64},
 }
 
 // let socket = {};
 
 let players = [{
     id: 1,
-    bet: {1000: 4, 500: 1},
+    bet: 1000,
     timeJoined: 123
 }];
+
+function betMoney(amm, betData){
+    socket.emit("addBet", {money: amm}, (res) => {
+        console.log(res.newMoney, res.bet);
+        player.bet = res.bet;
+    })    
+}
 
 socket.on('connect', () => {
     console.log('connected!');
     socket.emit("getHand", {}, (res) => {
         player.hand = res.cards;
         players = res.players;
-        socket.emit("addBet", {money: 1000}, (res) => {
-            console.log(res.newMoney, res.bet);
-        })
-        socket.emit("addBet", {money: 500}, (res) => {
-            console.log(res.newMoney, res.bet);
-        })
+        betMoney(2850);
     });
     socket.on("userJoin", (data) => {
         players = data;
-    })
+    });
+    socket.on("currentTurn", (data) => {
+        console.log(data);
+    });
 });
 
 
@@ -74,14 +82,28 @@ function drawTableCards(){
     }
 }
 function drawPlayerCards(){
+    const atlas = loadedImages['poker.png'];
+
     let gap = 5;
     let allCardsWidth = (scaledCardWidth + gap) * player.hand.length;
     let cardsStartPos = Math.floor(G_canvas.width / 2 - allCardsWidth / 2); 
 
+    // cards
     for (let i = 0; i < player.hand.length; i++){
         const cardInfo = player.hand[i];
         const card = getCard(cardInfo.points, cardInfo.type);
         G_ctx.drawImage(card, cardsStartPos + i * (scaledCardWidth + gap), G_canvas.height - scaledCardHeight, scaledCardWidth, scaledCardHeight);
+    }
+    // chips
+    const chips = getChipsFromNumber(player.bet);
+    const chipsArr = Object.keys(chips);
+    const chipSize = 16 * scale;
+    for (let j = 0; j < chipsArr.length; j++){
+        const chip = chipsArr[j];
+        for (let k = 0; k < chips[chip]; k++){
+            G_ctx.drawImage(atlas, chipPositions[chip].x, chipPositions[chip].y, 16, 16, cardsStartPos + chipSize * j, G_canvas.height - (scaledCardHeight + chipSize) - 10 * k, chipSize, chipSize)
+        }
+
     }
 }
 function drawOtherPlayers(){
@@ -95,7 +117,7 @@ function drawOtherPlayers(){
     let allCardsHeight = (scaledCardHeight + gap) * 2;
 
     let positions = [
-        {x: Math.floor(G_canvas.width / 2 - allCardsWidth / 2), y: -10, angle: 0},
+        {x: Math.floor(G_canvas.width / 2 - allCardsWidth / 2), y: -10, angle: 180},
         {x: 10, y: Math.floor(G_canvas.height / 2 - allCardsHeight / 2), angle: 90},
         {x: G_canvas.width - scaledCardWidth - 10, y: Math.floor(G_canvas.height / 2 - allCardsHeight / 2), angle: -90},
     ];
@@ -103,9 +125,10 @@ function drawOtherPlayers(){
     for (let i = 0; i < sorted.length; i++){
         if (sorted[i].id == socket.id) continue;
         // draw cards
+        if (!positions[actualIndex]) continue;
         for (let j = 0; j < 2; j++){
-            let gapX = positions[actualIndex].angle == 0 ? j * (scaledCardWidth + gap) : 0;
-            let gapY = positions[actualIndex].angle !== 0 ? j * (scaledCardWidth + gap) : 0;
+            let gapX = positions[actualIndex].angle == 0 || positions[actualIndex].angle == 180 ? j * (scaledCardWidth + gap) : 0;
+            let gapY = positions[actualIndex].angle !== 0 && positions[actualIndex].angle !== 180 ? j * (scaledCardWidth + gap) : 0;
             G_ctx.setTransform(1, 0, 0, 1, 0, 0); // Reset transforms
             const x = positions[actualIndex].x + gapX;
             const y = positions[actualIndex].y + gapY;
@@ -121,12 +144,27 @@ function drawOtherPlayers(){
         }
 
         // draw chips
-        const chips = Object.keys(sorted[i].bet);
+        const chips = getChipsFromNumber(sorted[i].bet);
+        const chipsArr = Object.keys(chips);
         const chipSize = 16 * scale;
-        for (let j = 0; j < chips.length; j++){
-            const chip = chips[j];
-            for (let k = 0; k < sorted[i].bet[chip]; k++){
-                G_ctx.drawImage(atlas, chipPositions[chip].x, chipPositions[chip].y, 16, 16, positions[actualIndex].x + chipSize * j, positions[actualIndex].y + scaledCardHeight + 10 * k, chipSize, chipSize)
+        for (let j = 0; j < chipsArr.length; j++){
+            const chip = chipsArr[j];
+            for (let k = 0; k < chips[chip]; k++){
+                let offsets = {
+                    0: {
+                        x: chipSize * j,
+                        y: scaledCardHeight + 10 * k
+                    },
+                    1: {
+                        x: (scaledCardWidth+20) + 10 * k,
+                        y: 20 + chipSize * j
+                    },
+                    2: {
+                        x: -(scaledCardWidth/2 + 10) - 10 * k,
+                        y: 20 + chipSize * j
+                    }
+                }
+                G_ctx.drawImage(atlas, chipPositions[chip].x, chipPositions[chip].y, 16, 16, positions[actualIndex].x + offsets[actualIndex].x, positions[actualIndex].y + offsets[actualIndex].y, chipSize, chipSize)
             }
 
         }
@@ -137,7 +175,7 @@ function clearBackground(){
     G_ctx.fillStyle = '#1d1d1d';
     G_ctx.fillRect(0, 0, G_canvas.width, G_canvas.height);
 }
-
+let lastTime = Date.now();
 function gameLoop(){
     requestAnimationFrame(gameLoop);
     clearBackground();
@@ -145,6 +183,8 @@ function gameLoop(){
     drawTableCards();
     drawPlayerCards();
     drawOtherPlayers();
+    dt = Date.now() - lastTime;
+    lastTime = Date.now();
 }
 function getCard(points = 2, type = CARD_HEART){
     if (createdCards[points+"_"+type]) return createdCards[points+"_"+type];
@@ -247,4 +287,26 @@ window.addEventListener('resize', () => {
         scaledCardWidth = cardWidth * scale;
         scaledCardHeight = cardHeight * scale;        
     }
-})
+});
+function getChipsFromNumber(num){
+    let newSum = num;
+
+    let t = Math.floor(num / 1000);
+    newSum -= t * 1000;
+    let fiveh = Math.floor(newSum / 500);
+    newSum -= fiveh * 500;
+    let twof = Math.floor(newSum / 250);
+    newSum -= twof * 250;
+    let huns = Math.floor(newSum / 100);
+    newSum -= huns * 100;
+
+    if (newSum > 0) console.error('something went wrong');
+
+    let chips = {
+        1000: t,
+        500: fiveh,
+        250: twof,
+        100: huns
+    }
+    return chips;
+}
