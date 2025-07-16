@@ -1,4 +1,7 @@
-const socket = io("http://localhost:3000");
+let lastPlayerID = sessionStorage.getItem("playerIDs");
+const socket = io("http://localhost:3000", {
+  auth: { playerID: lastPlayerID }
+});
 const G_canvas = document.querySelector('canvas');
 const G_ctx = G_canvas.getContext('2d');
 
@@ -12,6 +15,7 @@ let scale = 3;
 
 let testCard;
 let dt;
+let gameTime = 0;
 
 const CARD_HEART = 0;
 const CARD_DIAMOND = 1;
@@ -37,6 +41,7 @@ const chipPositions = {
     100: {x: 96, y: 64},
 }
 
+let cardsOnTable = [];
 // let socket = {};
 
 let players = [{
@@ -45,30 +50,45 @@ let players = [{
     timeJoined: 123
 }];
 
+let currentTurnPlayerID;
+
 function betMoney(amm, betData){
     socket.emit("addBet", {money: amm}, (res) => {
         console.log(res.newMoney, res.bet);
+        player.firstBet = true;
         player.bet = res.bet;
     })    
 }
 
 socket.on('connect', () => {
     console.log('connected!');
+    player.id = lastPlayerID || socket.id;
+    sessionStorage.setItem("playerIDs", player.id);
     socket.emit("getHand", {}, (res) => {
         player.hand = res.cards;
+        player.bet = res.bet;
+        cardsOnTable = res.table;
         players = res.players;
-        betMoney(2850);
+        if (!player.bet) betMoney(1000);
     });
     socket.on("userJoin", (data) => {
         players = data;
     });
     socket.on("currentTurn", (data) => {
-        console.log(data);
+        currentTurnPlayerID = data;
+        if (player.id == currentTurnPlayerID){
+            document.getElementById("yourTurn").style.opacity = 1;
+            setTimeout(()=> {
+                document.getElementById("yourTurn").style.opacity = 0;
+            }, 1000);
+        }
     });
+    socket.on("tableCards", (res) => {
+        cardsOnTable = res.cards;
+    })
 });
 
 
-const cardsOnTable = [];
 function drawTableCards(){
     let gap = 20;
     let allCardsWidth = (scaledCardWidth + gap) * 5;
@@ -103,12 +123,16 @@ function drawPlayerCards(){
         for (let k = 0; k < chips[chip]; k++){
             G_ctx.drawImage(atlas, chipPositions[chip].x, chipPositions[chip].y, 16, 16, cardsStartPos + chipSize * j, G_canvas.height - (scaledCardHeight + chipSize) - 10 * k, chipSize, chipSize)
         }
-
+    }
+    // your turn indicator
+    if (currentTurnPlayerID == player.id){
+        let movedPos = Math.floor(Math.sin(gameTime) * 10);
+        G_ctx.drawImage(atlas, 96, 48, 16, 16, Math.floor(cardsStartPos + allCardsWidth / 2 - chipSize / 2), (G_canvas.height - (scaledCardHeight + chipSize) - 15 * 5) + movedPos, chipSize, chipSize)
     }
 }
 function drawOtherPlayers(){
     const sorted = players.sort((a, b) => {
-        a.timeJoined - b.timeJoined
+        return a.timeJoined - b.timeJoined
     });
     const atlas = loadedImages['poker.png'];
 
@@ -123,7 +147,7 @@ function drawOtherPlayers(){
     ];
     let actualIndex = 0;
     for (let i = 0; i < sorted.length; i++){
-        if (sorted[i].id == socket.id) continue;
+        if (sorted[i].id == player.id) continue;
         // draw cards
         if (!positions[actualIndex]) continue;
         for (let j = 0; j < 2; j++){
@@ -142,6 +166,7 @@ function drawOtherPlayers(){
             G_ctx.drawImage(card, -scaledCardWidth / 2, -scaledCardHeight / 2, scaledCardWidth, scaledCardHeight);            
             G_ctx.restore();
         }
+        
 
         // draw chips
         const chips = getChipsFromNumber(sorted[i].bet);
@@ -168,6 +193,35 @@ function drawOtherPlayers(){
             }
 
         }
+        // your turn indicator
+        if (currentTurnPlayerID == sorted[i].id){
+            let movedPos = Math.floor(Math.sin(gameTime) * 10);
+            let offsets = {
+                0: {
+                    x: allCardsWidth / 2 - chipSize / 2,
+                    y: scaledCardHeight + chipSize * 2.5 + movedPos,
+                    angle: 180,
+                },
+                1: {
+                    x: scaledCardHeight + chipSize * 2 + movedPos,
+                    y: allCardsWidth / 2 + chipSize / 2,
+                    angle: 90,
+
+                },
+                2: {
+                    x: -chipSize * 3 + movedPos,
+                    y: allCardsWidth / 2 + chipSize / 1.2,
+                    angle: -90,
+                }
+            }
+            G_ctx.save();
+            G_ctx.translate(Math.floor(positions[actualIndex].x + offsets[actualIndex].x + chipSize / 2), Math.floor(positions[actualIndex].y + offsets[actualIndex].y - chipSize / 2));
+            G_ctx.rotate(offsets[actualIndex].angle * Math.PI / 180);
+            G_ctx.drawImage(atlas, 96, 48, 16, 16, -chipSize / 2, -chipSize / 2, chipSize, chipSize)
+            G_ctx.restore();
+        }
+        G_ctx.fillStyle = 'red';
+        G_ctx.fillText(sorted[i].id, positions[actualIndex].x, positions[actualIndex].y + 50);
         actualIndex++;
     }
 }
@@ -184,7 +238,9 @@ function gameLoop(){
     drawPlayerCards();
     drawOtherPlayers();
     dt = Date.now() - lastTime;
+    gameTime += 0.01 * dt;
     lastTime = Date.now();
+    if (!sessionStorage.playerIDs) sessionStorage.setItem("playerIDs", player.id);
 }
 function getCard(points = 2, type = CARD_HEART){
     if (createdCards[points+"_"+type]) return createdCards[points+"_"+type];
