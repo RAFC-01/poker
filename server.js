@@ -18,6 +18,7 @@ let gameInProgress = false;
 let socketIds = {};
 let gameStage = 0;
 let tableCards = [];
+let playerColors = ['red', 'yellow', 'blue', 'green'];
 
 io.on("connection", (socket) => {
     let currentSocketInfo;
@@ -40,6 +41,7 @@ io.on("connection", (socket) => {
         socketIds[socket.id].secretInfo = {};
         players.push(socketIds[socket.id].player);
         currentSocketInfo = socketIds[socket.id];
+        currentSocketInfo.player.color = playerColors[players.length - 1];
     }
     players.sort((a, b) => a.timeJoined - b.timeJoined);
     console.log("user connected: ", currentSocketInfo.id);
@@ -55,11 +57,13 @@ io.on("connection", (socket) => {
 
         socket.broadcast.emit("userJoin", players);
 
-        if (callback) callback({cards: currentSocketInfo.secretInfo.cards, players: players, bet: currentSocketInfo.player.bet, table: tableCards})
+        if (callback) callback({cards: currentSocketInfo.secretInfo.cards, players: players, bet: currentSocketInfo.player.bet, table: tableCards,
+             folded: currentSocketInfo.player.hasFolded, color: currentSocketInfo.player.color})
     });
     socket.on("addBet", (data, callback) => {
         if (currentPlayerTurnId != currentSocketInfo.player.id && currentSocketInfo.player.firstBet) return;
         let betAmm = data.money;
+        if (!betAmm || currentSocketInfo.player.hasFolded) return;
         let correctBet = currentSocketInfo.player.bet;
 
         if (betAmm <= currentSocketInfo.player.money){
@@ -67,7 +71,7 @@ io.on("connection", (socket) => {
             correctBet += betAmm;
             currentSocketInfo.player.bet = correctBet;
 
-            socket.broadcast.emit("userJoin", players);
+            io.emit("userJoin", players);
             gameInProgress = true;
             
             if (currentSocketInfo.player.firstBet){
@@ -75,13 +79,22 @@ io.on("connection", (socket) => {
                 currentPlayerTurnId = players[nextPlayerIndex].id;
                 io.emit("currentTurn", currentPlayerTurnId);
                 if (checkAllPlayersEqual()){
-                    goToNextGameStage(socket);
+                    goToNextGameStage(socket, currentSocketInfo);
                 }
             }
             
             currentSocketInfo.player.firstBet = true;
         }
         callback({newMoney: currentSocketInfo.player.money, bet: correctBet});
+    });
+    socket.on('fold', () => {
+        currentSocketInfo.player.hasFolded = true;
+        let nextPlayerIndex = getNextPlayerIndex();
+        currentPlayerTurnId = players[nextPlayerIndex].id;
+        io.emit("currentTurn", currentPlayerTurnId);
+        if (checkAllPlayersEqual()){
+            goToNextGameStage(socket, currentSocketInfo);
+        }
     });
     socket.on('disconnect', () => { 
         console.log('user disconnected: ', currentSocketInfo.id);
@@ -107,9 +120,17 @@ function makeSureDirExists(path){
 }
 function getNextPlayerIndex(){
     let currentPlayerIndex = getPlayerByID(currentPlayerTurnId);
-    return (currentPlayerIndex + 1) % players.length;
+    let index = currentPlayerIndex + 1;
+    let maxI = players.length;
+    let i = 0;
+    while (players[index % players.length].hasFolded){
+        index++;
+        i++;
+        if (i > maxI) return currentPlayerIndex;
+    } 
+    return index % players.length;
 }
-function goToNextGameStage(socket){
+function goToNextGameStage(socket, user){
     gameStage++;
     if (gameStage == 1){
         revealTableCards(3, socket);
@@ -120,6 +141,7 @@ function goToNextGameStage(socket){
     if (gameStage == 3){
         revealTableCards(1, socket);
     }
+    checkPlayerPoints(socket, user);
 }
 function revealTableCards(amm, socket){
     let cards = getCards(amm);
@@ -167,4 +189,78 @@ function getCards(amm){
         cards.push(card); 
     }
     return cards;
+}
+const cardValues = [
+    {
+        name: 'Royal Flush',
+        sameSuit: true,
+        cardValues: [0, 13, 12, 11, 10]
+    },
+    {
+        name: 'Straight Flush',
+        sameSuit: true,
+        inOrder: true,
+        cardValues: 0 // any
+    },
+    {
+        name: 'Four Of A Kind',
+        sameSuit: false,
+        matchingCards: [4], 
+        cardValues: 0 // any
+    },
+    {
+        name: 'Full house',
+        sameSuit: false,
+        matchingCards: [3, 2], 
+        cardValues: 0 // any
+    },
+    {
+        name: 'Flush',
+        sameSuit: true,
+        cardValues: 0 // any
+    },
+    {
+        name: 'Straight',
+        sameSuit: false,
+        inOrder: true,
+        cardValues: 0 // any
+    },        
+    {
+        name: 'Three of a kind',
+        sameSuit: false,
+        matchingCards: [3],
+        cardValues: 0 // any
+    },
+    {
+        name: 'Two pair',
+        sameSuit: false,
+        matchingCards: [2, 2],
+        cardValues: 0 // any
+    },         
+    {
+        name: 'Pair',
+        sameSuit: false,
+        matchingCards: [2],
+        cardValues: 0 // any
+    },         
+    {
+        name: 'High Card',
+        sameSuit: false,
+        cardValues: 0 // any
+    },                  
+];
+function updateAllPlayersPoints(){
+    for (let i = 0; i < players.length; i++){
+        
+    }
+}
+function checkPlayerPoints(socket, user){
+    let allCards = [];
+    for (let i = 0; i < tableCards.length; i++){
+        allCards.push(tableCards[i]);
+    }
+    for (let i = 0; i < user.secretInfo.cards.length; i++){
+        allCards.push(user.secretInfo.cards[i]);
+    }
+    console.log(allCards);
 }

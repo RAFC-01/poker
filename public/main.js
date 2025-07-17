@@ -28,10 +28,13 @@ const cardHeight = 52;
 let scaledCardWidth = cardWidth * scale;
 let scaledCardHeight = cardHeight * scale;
 
+let G_highestBet = 0;
+
 const player = {
     hand: [],
     money: 5000,
-    bet: 0
+    bet: 0,
+    hasFolded: false
 };
 
 const chipPositions = {
@@ -47,12 +50,14 @@ let cardsOnTable = [];
 let players = [{
     id: 1,
     bet: 1000,
-    timeJoined: 123
+    timeJoined: 123,
+    hasFolded: false,
 }];
 
 let currentTurnPlayerID;
 
-function betMoney(amm, betData){
+function betMoney(amm){
+    if ((currentTurnPlayerID !== player.id && player.firstBet) || player.money == 0) return;
     socket.emit("addBet", {money: amm}, (res) => {
         console.log(res.newMoney, res.bet);
         player.firstBet = true;
@@ -67,27 +72,39 @@ socket.on('connect', () => {
     socket.emit("getHand", {}, (res) => {
         player.hand = res.cards;
         player.bet = res.bet;
+        player.hasFolded = res.folded;
+        player.color = res.color;
         cardsOnTable = res.table;
         players = res.players;
         if (!player.bet) betMoney(1000);
     });
     socket.on("userJoin", (data) => {
         players = data;
+        console.log('here');
+        G_highestBet = getHighestBet();
     });
     socket.on("currentTurn", (data) => {
         currentTurnPlayerID = data;
         if (player.id == currentTurnPlayerID){
-            document.getElementById("yourTurn").style.opacity = 1;
-            setTimeout(()=> {
-                document.getElementById("yourTurn").style.opacity = 0;
-            }, 1000);
+            yourTurn();
+        }else{
+            hideYourTurn();
         }
     });
     socket.on("tableCards", (res) => {
         cardsOnTable = res.cards;
     })
 });
-
+function yourTurn(){
+    document.getElementById("yourTurn").style.opacity = 1;
+    setTimeout(()=> {
+        document.getElementById("yourTurn").style.opacity = 0;
+    }, 1000);
+    document.getElementById("bet").style.display = 'block';
+}
+function hideYourTurn(){
+    document.getElementById("bet").style.display = 'none';
+}
 
 function drawTableCards(){
     let gap = 20;
@@ -100,6 +117,12 @@ function drawTableCards(){
 
         G_ctx.drawImage(card, cardsStartPos + i * (scaledCardWidth + gap), G_canvas.height / 2 - scaledCardHeight / 2, scaledCardWidth, scaledCardHeight);
     }
+    G_ctx.beginPath();
+    G_ctx.fillStyle = 'white';
+    G_ctx.font = '20px Arial';
+    G_ctx.fillText("Highest bet: "+G_highestBet, cardsStartPos, G_canvas.height / 2 - scaledCardHeight / 2 - 20);
+    G_ctx.closePath();
+
 }
 function drawPlayerCards(){
     const atlas = loadedImages['poker.png'];
@@ -129,6 +152,13 @@ function drawPlayerCards(){
         let movedPos = Math.floor(Math.sin(gameTime) * 10);
         G_ctx.drawImage(atlas, 96, 48, 16, 16, Math.floor(cardsStartPos + allCardsWidth / 2 - chipSize / 2), (G_canvas.height - (scaledCardHeight + chipSize) - 15 * 5) + movedPos, chipSize, chipSize)
     }
+    // player color
+    G_ctx.beginPath();
+    G_ctx.fillStyle = player.color;
+    let size = 16 * scale;
+    G_ctx.fillRect(cardsStartPos-size, G_canvas.height - size, size, size);
+    G_ctx.closePath();
+
 }
 function drawOtherPlayers(){
     const sorted = players.sort((a, b) => {
@@ -217,13 +247,39 @@ function drawOtherPlayers(){
             G_ctx.save();
             G_ctx.translate(Math.floor(positions[actualIndex].x + offsets[actualIndex].x + chipSize / 2), Math.floor(positions[actualIndex].y + offsets[actualIndex].y - chipSize / 2));
             G_ctx.rotate(offsets[actualIndex].angle * Math.PI / 180);
-            G_ctx.drawImage(atlas, 96, 48, 16, 16, -chipSize / 2, -chipSize / 2, chipSize, chipSize)
+            G_ctx.drawImage(atlas, 96, 48, 16, 16, -chipSize / 2, -chipSize / 2, chipSize, chipSize);
             G_ctx.restore();
         }
-        G_ctx.fillStyle = 'red';
-        G_ctx.fillText(sorted[i].id, positions[actualIndex].x, positions[actualIndex].y + 50);
+        // player color
+        G_ctx.beginPath();
+        G_ctx.fillStyle = sorted[i].color;
+        let size = 16 * scale;
+        let colorPos = {
+            0: {
+                x: positions[actualIndex].x-size,
+                y: positions[actualIndex].y
+            },
+            1: {
+                x: positions[actualIndex].x - size / 2,
+                y: positions[actualIndex].y - size / 2
+            },
+            2: {
+                x: positions[actualIndex].x+scaledCardHeight - size * 1.5,
+                y: positions[actualIndex].y - size / 2
+            },
+
+        }
+        G_ctx.fillRect(colorPos[actualIndex].x, colorPos[actualIndex].y, size, size);
+        G_ctx.closePath();
         actualIndex++;
     }
+}
+function getHighestBet(){
+    let highest = 0;
+    for (let i = 0; i < players.length; i++){
+        if (players[i].bet > highest) highest = players[i].bet;
+    }
+    return highest;
 }
 function clearBackground(){
     G_ctx.fillStyle = '#1d1d1d';
@@ -365,4 +421,26 @@ function getChipsFromNumber(num){
         100: huns
     }
     return chips;
+}
+document.addEventListener('keydown', (e) => {
+    const key = e.key.toLowerCase();
+    if (key == ' '){
+        matchBet();
+    }
+    if (key == 'f'){
+        fold();
+    }
+});
+function fold(){
+    if (!player.hasFolded){
+        player.hasFolded = true;
+        socket.emit("fold");
+    }
+}
+function matchBet(){
+    let highest = getHighestBet();
+    let betAmm = highest - player.bet;
+
+    if (betAmm == 0) betAmm = 1000;
+    betMoney(betAmm);
 }
