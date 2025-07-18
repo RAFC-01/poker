@@ -28,10 +28,11 @@ io.on("connection", (socket) => {
     if (socketIds[lastPlayerID]) {
         console.log('found');
         currentSocketInfo = socketIds[lastPlayerID]; 
+        currentSocketInfo.socket = socket;
         players.push(currentSocketInfo.player);
     }else{
         console.log('not found');
-        socketIds[socket.id] = {id: socket.id.toString(), secretInfo: socket.secretInfo, player: socket.player};
+        socketIds[socket.id] = {id: socket.id.toString(), secretInfo: socket.secretInfo, player: socket.player, socket: socket};
         socketIds[socket.id].player = {
             id: socketIds[socket.id].id.toString(),
             timeJoined: parseInt(Date.now()),
@@ -50,12 +51,14 @@ io.on("connection", (socket) => {
     socket.on('getHand', (data, callback) => {
         if (!currentSocketInfo.hasCards){
             currentSocketInfo.player.money = 5000;
-            const userCards = getCards(2);
+            const userCards = getCards(2, true);
             currentSocketInfo.secretInfo.cards = userCards;
             currentSocketInfo.hasCards = true;
         }
-
+        
         socket.broadcast.emit("userJoin", players);
+        
+        updateAllPlayersPoints();
 
         if (callback) callback({cards: currentSocketInfo.secretInfo.cards, players: players, bet: currentSocketInfo.player.bet, table: tableCards,
              folded: currentSocketInfo.player.hasFolded, color: currentSocketInfo.player.color})
@@ -141,7 +144,8 @@ function goToNextGameStage(socket, user){
     if (gameStage == 3){
         revealTableCards(1, socket);
     }
-    checkPlayerPoints(socket, user);
+    updateAllPlayersPoints();
+    // checkPlayerPoints(user);
 }
 function revealTableCards(amm, socket){
     let cards = getCards(amm);
@@ -162,6 +166,7 @@ function getPlayerByID(id){
     for (let i = 0; i < players.length; i++){
         if (players[i].id == id) return i;
     }
+    return false;
 }
 // Start
 server.listen(PORT, () => {
@@ -180,11 +185,12 @@ function createRandomCardPool(){
     }
     return pool;
 }
-function getCards(amm){
+function getCards(amm, user){
     const cards = [];
     for (let i = 0; i < amm; i++){
         const cardIndex = Math.floor(Math.random() * cardPool.length);
         const card = cardPool[cardIndex];
+        card.isHand = user;
         cardPool.splice(cardIndex, 1);
         cards.push(card); 
     }
@@ -217,6 +223,7 @@ const cardValues = [
     {
         name: 'Flush',
         sameSuit: true,
+        minAmm: 5,
         cardValues: 0 // any
     },
     {
@@ -251,16 +258,78 @@ const cardValues = [
 ];
 function updateAllPlayersPoints(){
     for (let i = 0; i < players.length; i++){
-        
+        console.log(checkPlayerPoints(socketIds[players[i].id]));
+        socketIds[players[i].id].socket?.emit("test", {id: players[i].id});
     }
 }
-function checkPlayerPoints(socket, user){
+function checkPlayerPoints(user){
     let allCards = [];
+    let cardPoints = 0;
     for (let i = 0; i < tableCards.length; i++){
         allCards.push(tableCards[i]);
     }
-    for (let i = 0; i < user.secretInfo.cards.length; i++){
-        allCards.push(user.secretInfo.cards[i]);
+    if (user.hasCards){
+        for (let i = 0; i < user.secretInfo.cards.length; i++){
+            allCards.push(user.secretInfo.cards[i]);
+        }
+    }
+
+    for (let i = 0; i < cardValues.length; i++){
+        let found = false;
+        let matchingCards = {};
+        let sameSuit = true;
+        let hasCardValues = true;
+        let correctMatches = true;
+        let minAmm = true; 
+        if (cardValues[i].minAmm) minAmm = cardValues[i].minAmm <= allCards.length;
+        let inOrder = {isTrue: true};
+        if (cardValues[i].inOrder) inOrder = isFiveInOrder(allCards);
+        for (let j = 0; j < allCards.length; j++){
+            if (cardValues[i].sameSuit && allCards[0].type != allCards[j].type) sameSuit = false;
+            matchingCards[allCards[j].points] == undefined ? matchingCards[allCards[j].points] = 1 : matchingCards[allCards[j].points]++;
+            if (allCards.length < cardValues[i].cardValues.length || cardValues[i].cardValues && !cardValues[i].cardValues.includes(allCards[j].value)) hasCardValues = false;
+        }
+
+        // check matching cards
+        if (cardValues[i].matchingCards){
+            let matchingCardsValues = Object.values(matchingCards);
+            for (let j = 0; j < cardValues[i].matchingCards.length; j++){
+                let amm = cardValues[i].matchingCards[j];
+                if (!matchingCardsValues.includes(amm)) correctMatches = false; // its gonna exit on 4 of a kind if the pair are the same suit
+                else matchingCardsValues.splice(matchingCardsValues.indexOf(amm), 1);
+            }
+        }
+
+        console.log({sameSuit, hasCardValues, correctMatches, inOrder: inOrder.isTrue, minAmm})
+
+        if (inOrder.points) cardPoints += inOrder.points;
+
+        if (sameSuit && hasCardValues && correctMatches && inOrder.isTrue && minAmm) found = true;
+
+        if (found || i == cardValues.length - 1) return {value: cardValues[i]};
     }
     console.log(allCards);
+}
+function isFiveInOrder(cards = []){
+    if (cards.length < 5) return false;
+    cards.sort((a, b) => a.points - b.points);
+    let streak = 0;
+    let highestStreak = 0;
+    let last = -1;
+    let pointsTotal = 0;
+    let currPoints = 0;
+    for (let i = 0; i < cards.length; i++){
+        if (cards[i].points - 1 == last){
+            streak++;
+            if (!cards[i].isHand) currPoints += cards[i].points;
+        }else{
+            streak = 0;
+            currPoints = 0;
+        } 
+        if (streak > highestStreak) highestStreak = streak;
+        if (currPoints > pointsTotal) pointsTotal = currPoints;
+        last = cards[i].points;
+    }
+    console.log(streak);
+    return { isTrue: streak >= 5, points: pointsTotal };
 }

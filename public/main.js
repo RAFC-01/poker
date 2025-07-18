@@ -94,6 +94,9 @@ socket.on('connect', () => {
     socket.on("tableCards", (res) => {
         cardsOnTable = res.cards;
     })
+    socket.on("test", (res) => {
+        console.log(res);
+    })
 });
 function yourTurn(){
     document.getElementById("yourTurn").style.opacity = 1;
