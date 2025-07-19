@@ -94,8 +94,8 @@ socket.on('connect', () => {
     socket.on("tableCards", (res) => {
         cardsOnTable = res.cards;
     })
-    socket.on("test", (res) => {
-        console.log(res);
+    socket.on("cardsValue", (res) => {
+        console.log(res.points.value.name);
     })
 });
 function yourTurn(){

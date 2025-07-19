@@ -138,17 +138,17 @@ function goToNextGameStage(socket, user){
     if (gameStage == 1){
         revealTableCards(3, socket);
     }
-    if (gameStage == 2){
-        revealTableCards(1, socket);
-    }
-    if (gameStage == 3){
-        revealTableCards(1, socket);
-    }
+    // if (gameStage == 2){
+    //     revealTableCards(1, socket);
+    // }
+    // if (gameStage == 3){
+    //     revealTableCards(1, socket);
+    // }
     updateAllPlayersPoints();
     // checkPlayerPoints(user);
 }
 function revealTableCards(amm, socket){
-    let cards = getCards(amm);
+    let cards = getStraight();//getCards(amm);
 
     for (let i = 0; i < cards.length; i++){
         tableCards.push(cards[i]);
@@ -180,10 +180,19 @@ function createRandomCardPool(){
     const pool = [];
     for (let i = 0; i < 13; i++){
         for (let j = 0; j < 4; j++){
-            pool.push({points: i + 1, type: j});
+            pool.push({points: i+1, type: j});
         }
     }
     return pool;
+}
+function getStraight(){
+    return [
+        {points: 1, type: 1},
+        {points: 2, type: 1},
+        {points: 3, type: 1},
+        {points: 4, type: 1},
+        {points: 5, type: 1},
+    ];
 }
 function getCards(amm, user){
     const cards = [];
@@ -258,9 +267,13 @@ const cardValues = [
 ];
 function updateAllPlayersPoints(){
     for (let i = 0; i < players.length; i++){
-        console.log(checkPlayerPoints(socketIds[players[i].id]));
-        socketIds[players[i].id].socket?.emit("test", {id: players[i].id});
+        let points = checkPlayerPoints(socketIds[players[i].id]);
+        socketIds[players[i].id].socket?.emit("cardsValue", {points: points});
     }
+}
+function getRealPoints(points){
+    if (points == 1) return 14;
+    else return points;
 }
 function checkPlayerPoints(user){
     let allCards = [];
@@ -271,6 +284,7 @@ function checkPlayerPoints(user){
     if (user.hasCards){
         for (let i = 0; i < user.secretInfo.cards.length; i++){
             allCards.push(user.secretInfo.cards[i]);
+            cardPoints += getRealPoints(user.secretInfo.cards[i].points);
         }
     }
 
@@ -280,40 +294,55 @@ function checkPlayerPoints(user){
         let sameSuit = true;
         let hasCardValues = true;
         let correctMatches = true;
+        let addedPoints = 0;
         let minAmm = true; 
         if (cardValues[i].minAmm) minAmm = cardValues[i].minAmm <= allCards.length;
         let inOrder = {isTrue: true};
         if (cardValues[i].inOrder) inOrder = isFiveInOrder(allCards);
+        let sameSuitAmm = 0;
+        let currSameSuit = 0;
         for (let j = 0; j < allCards.length; j++){
-            if (cardValues[i].sameSuit && allCards[0].type != allCards[j].type) sameSuit = false;
+            if (allCards[0].type == allCards[j].type) sameSuit = false;
             matchingCards[allCards[j].points] == undefined ? matchingCards[allCards[j].points] = 1 : matchingCards[allCards[j].points]++;
             if (allCards.length < cardValues[i].cardValues.length || cardValues[i].cardValues && !cardValues[i].cardValues.includes(allCards[j].value)) hasCardValues = false;
         }
 
         // check matching cards
         if (cardValues[i].matchingCards){
-            let matchingCardsValues = Object.values(matchingCards);
+            let matchingCardsKeys = Object.keys(matchingCards);
             for (let j = 0; j < cardValues[i].matchingCards.length; j++){
                 let amm = cardValues[i].matchingCards[j];
-                if (!matchingCardsValues.includes(amm)) correctMatches = false; // its gonna exit on 4 of a kind if the pair are the same suit
-                else matchingCardsValues.splice(matchingCardsValues.indexOf(amm), 1);
+                let matchFound = false;
+                for (let k = matchingCardsKeys.length-1; k >= 0; k--){
+                    let key = matchingCardsKeys[k];
+                    let ammValue = matchingCards[key];
+                    if (ammValue >= amm){
+                        matchFound = true;
+                        delete matchingCards[key];
+                        addedPoints += amm * getRealPoints(key);
+                        break;
+                    }
+                }
+                if (!matchFound) {
+                    correctMatches = false;
+                    break;
+                }
             }
         }
 
-        console.log({sameSuit, hasCardValues, correctMatches, inOrder: inOrder.isTrue, minAmm})
+        console.log({name: cardValues[i].name, sameSuit, hasCardValues, correctMatches, inOrder: inOrder.isTrue, minAmm})
 
-        if (inOrder.points) cardPoints += inOrder.points;
+        if (inOrder.points) addedPoints += inOrder.points;
 
         if (sameSuit && hasCardValues && correctMatches && inOrder.isTrue && minAmm) found = true;
 
-        if (found || i == cardValues.length - 1) return {value: cardValues[i]};
+        if (found || i == cardValues.length - 1) return {value: cardValues[i], points: addedPoints, handPoints: cardPoints};
     }
-    console.log(allCards);
 }
 function isFiveInOrder(cards = []){
     if (cards.length < 5) return false;
     cards.sort((a, b) => a.points - b.points);
-    let streak = 0;
+    let streak = 1;
     let highestStreak = 0;
     let last = -1;
     let pointsTotal = 0;
@@ -321,15 +350,17 @@ function isFiveInOrder(cards = []){
     for (let i = 0; i < cards.length; i++){
         if (cards[i].points - 1 == last){
             streak++;
-            if (!cards[i].isHand) currPoints += cards[i].points;
+            currPoints += getRealPoints(cards[i].points);
         }else{
-            streak = 0;
-            currPoints = 0;
+            if (cards[i].points !== last){
+                streak = 1;
+                currPoints = 0;
+            } 
         } 
         if (streak > highestStreak) highestStreak = streak;
         if (currPoints > pointsTotal) pointsTotal = currPoints;
         last = cards[i].points;
     }
-    console.log(streak);
-    return { isTrue: streak >= 5, points: pointsTotal };
+    // console.log({highestStreak, cards});
+    return { isTrue: highestStreak >= 5, points: pointsTotal };
 }
