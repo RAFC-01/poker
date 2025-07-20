@@ -187,11 +187,11 @@ function createRandomCardPool(){
 }
 function getStraight(){
     return [
-        {points: 1, type: 1},
-        {points: 2, type: 1},
-        {points: 3, type: 1},
-        {points: 4, type: 1},
-        {points: 5, type: 1},
+        {points: 9, type: 1},
+        {points: 13, type: 1},
+        {points: 12, type: 1},
+        {points: 11, type: 1},
+        {points: 10, type: 1},
     ];
 }
 function getCards(amm, user){
@@ -209,7 +209,8 @@ const cardValues = [
     {
         name: 'Royal Flush',
         sameSuit: true,
-        cardValues: [0, 13, 12, 11, 10]
+        minAmm: 5,
+        cardValues: [1, 13, 12, 11, 10]
     },
     {
         name: 'Straight Flush',
@@ -288,10 +289,12 @@ function checkPlayerPoints(user){
         }
     }
 
+    allCards.sort((a, b) => a.type - b.type);
+
     for (let i = 0; i < cardValues.length; i++){
         let found = false;
         let matchingCards = {};
-        let sameSuit = true;
+        let sameSuit = false;;
         let hasCardValues = true;
         let correctMatches = true;
         let addedPoints = 0;
@@ -300,12 +303,29 @@ function checkPlayerPoints(user){
         let inOrder = {isTrue: true};
         if (cardValues[i].inOrder) inOrder = isFiveInOrder(allCards);
         let sameSuitAmm = 0;
-        let currSameSuit = 0;
+        let currSameSuit = 1;
+
+        let lastValueSuit;
+
+        let cardValuesIncluded = 0;
+        let sameSuitValues = 0;
+        let seenSuitValues = {};
+
         for (let j = 0; j < allCards.length; j++){
-            if (allCards[0].type == allCards[j].type) sameSuit = false;
+            
+            if (allCards[j].type == allCards[j-1]?.type) currSameSuit += 1;
+            else currSameSuit = 1;
+
+            if (currSameSuit > sameSuitAmm) sameSuitAmm = currSameSuit;
+
             matchingCards[allCards[j].points] == undefined ? matchingCards[allCards[j].points] = 1 : matchingCards[allCards[j].points]++;
-            if (allCards.length < cardValues[i].cardValues.length || cardValues[i].cardValues && !cardValues[i].cardValues.includes(allCards[j].value)) hasCardValues = false;
         }
+
+        if (cardValues[i].cardValues) hasCardValues = checkValues(allCards, cardValues[i].cardValues, cardValues[i].sameSuit);
+
+        if (cardValues[i].sameSuit && cardValues[i].minAmm <= sameSuitAmm) sameSuit = true;
+
+        console.log(sameSuitValues);
 
         // check matching cards
         if (cardValues[i].matchingCards){
@@ -330,37 +350,82 @@ function checkPlayerPoints(user){
             }
         }
 
+        
+        if (inOrder.points) {
+            addedPoints += inOrder.points;
+            console.log(inOrder);
+            if (cardValues[i].sameSuit) sameSuit = inOrder.sameSuit;
+        }
         console.log({name: cardValues[i].name, sameSuit, hasCardValues, correctMatches, inOrder: inOrder.isTrue, minAmm})
-
-        if (inOrder.points) addedPoints += inOrder.points;
 
         if (sameSuit && hasCardValues && correctMatches && inOrder.isTrue && minAmm) found = true;
 
         if (found || i == cardValues.length - 1) return {value: cardValues[i], points: addedPoints, handPoints: cardPoints};
     }
 }
+function checkValues(cards = [], required = [], sameSuit = true){
+    if (cards.length < 5) return false;
+    let seenPoints = {};
+    let foundType = {};
+    let found = 0;
+    for (let i = 0; i < cards.length; i++){
+        let seen = false;
+        for (let j = 0; j < required.length; j++){
+            if (cards[i].points == required[j]){
+                seen = true;
+                break;
+            }
+        }
+        if (!seen) continue;
+        if (!seenPoints[cards[i].points] || !foundType[cards[i].type]){
+            if (sameSuit){
+                foundType[cards[i].type] ? foundType[cards[i].type]++ : foundType[cards[i].type] = 1;
+                if (found < foundType[cards[i].type]) found = foundType[cards[i].type]; 
+            }else{
+                found++;
+            }
+        }
+        seenPoints[cards[i].points] = 1;
+    }
+    console.log(foundType);
+    if (required.length <= found) return true;
+    return false;
+}
 function isFiveInOrder(cards = []){
     if (cards.length < 5) return false;
+    for (let i = 0; i < cards.length; i++){
+        if (cards[i].points == 1) cards.push({points: 14, type: cards[i].type});
+    }
     cards.sort((a, b) => a.points - b.points);
+    console.log(cards);
     let streak = 1;
     let highestStreak = 0;
     let last = -1;
     let pointsTotal = 0;
     let currPoints = 0;
+    let isHighSameSuit = false;
+    let currSameSuit = {};
     for (let i = 0; i < cards.length; i++){
         if (cards[i].points - 1 == last){
             streak++;
             currPoints += getRealPoints(cards[i].points);
+            if (cards[i].type == cards[i-1]?.type){
+                currSameSuit[cards[i].type] ? currSameSuit[cards[i].type]++ : currSameSuit[cards[i].type] = 1;
+                if (currSameSuit[cards[i].type] > isHighSameSuit) isHighSameSuit = currSameSuit[cards[i].type];
+            }
         }else{
             if (cards[i].points !== last){
                 streak = 1;
                 currPoints = 0;
             } 
         } 
-        if (streak > highestStreak) highestStreak = streak;
+        if (streak > highestStreak) {
+            highestStreak = streak;
+        }
+        console.log(isHighSameSuit);
         if (currPoints > pointsTotal) pointsTotal = currPoints;
         last = cards[i].points;
     }
     // console.log({highestStreak, cards});
-    return { isTrue: highestStreak >= 5, points: pointsTotal };
+    return { isTrue: highestStreak >= 5, points: pointsTotal, sameSuit: isHighSameSuit };
 }
