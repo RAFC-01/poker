@@ -188,7 +188,7 @@ function createRandomCardPool(){
 function getStraight(){
     return [
         {points: 9, type: 1},
-        {points: 13, type: 1},
+        {points: 13, type: 2},
         {points: 12, type: 1},
         {points: 11, type: 1},
         {points: 10, type: 1},
@@ -294,7 +294,7 @@ function checkPlayerPoints(user){
     for (let i = 0; i < cardValues.length; i++){
         let found = false;
         let matchingCards = {};
-        let sameSuit = false;;
+        let sameSuit = !cardValues[i].sameSuit;
         let hasCardValues = true;
         let correctMatches = true;
         let addedPoints = 0;
@@ -329,7 +329,8 @@ function checkPlayerPoints(user){
 
         // check matching cards
         if (cardValues[i].matchingCards){
-            let matchingCardsKeys = Object.keys(matchingCards);
+            let matchingCardsKeys = Object.keys(matchingCards); 
+            console.log(matchingCards)
             for (let j = 0; j < cardValues[i].matchingCards.length; j++){
                 let amm = cardValues[i].matchingCards[j];
                 let matchFound = false;
@@ -392,12 +393,13 @@ function checkValues(cards = [], required = [], sameSuit = true){
     return false;
 }
 function isFiveInOrder(cards = []){
-    if (cards.length < 5) return false;
-    for (let i = 0; i < cards.length; i++){
-        if (cards[i].points == 1) cards.push({points: 14, type: cards[i].type});
+    const currCard = cards.slice(0, cards.length); // copy not reference
+    if (currCard.length < 5) return false;
+    for (let i = 0; i < currCard.length; i++){
+        if (currCard[i].points == 1) currCard.push({points: 14, type: currCard[i].type});
     }
-    cards.sort((a, b) => a.points - b.points);
-    console.log(cards);
+    currCard.sort((a, b) => a.points - b.points);
+    console.log(currCard);
     let streak = 1;
     let highestStreak = 0;
     let last = -1;
@@ -405,16 +407,17 @@ function isFiveInOrder(cards = []){
     let currPoints = 0;
     let isHighSameSuit = false;
     let currSameSuit = {};
-    for (let i = 0; i < cards.length; i++){
-        if (cards[i].points - 1 == last){
+    for (let i = 0; i < currCard.length; i++){
+        if (!currSameSuit[currCard[i].type]) currSameSuit[currCard[i].type] = 1;
+        console.log(currCard[i]);
+        if (currCard[i].points - 1 == last){
             streak++;
-            currPoints += getRealPoints(cards[i].points);
-            if (cards[i].type == cards[i-1]?.type){
-                currSameSuit[cards[i].type] ? currSameSuit[cards[i].type]++ : currSameSuit[cards[i].type] = 1;
-                if (currSameSuit[cards[i].type] > isHighSameSuit) isHighSameSuit = currSameSuit[cards[i].type];
-            }
+            currPoints += getRealPoints(currCard[i].points);
+            currSameSuit[currCard[i].type] ? currSameSuit[currCard[i].type]++ : currSameSuit[currCard[i].type] = 1;
+            if (currSameSuit[currCard[i].type] > isHighSameSuit) isHighSameSuit = currSameSuit[currCard[i].type];
+            console.log(currCard[i])
         }else{
-            if (cards[i].points !== last){
+            if (currCard[i].points !== last){
                 streak = 1;
                 currPoints = 0;
             } 
@@ -424,8 +427,8 @@ function isFiveInOrder(cards = []){
         }
         console.log(isHighSameSuit);
         if (currPoints > pointsTotal) pointsTotal = currPoints;
-        last = cards[i].points;
+        last = currCard[i].points;
     }
-    // console.log({highestStreak, cards});
+    console.log({currSameSuit, currCard});
     return { isTrue: highestStreak >= 5, points: pointsTotal, sameSuit: isHighSameSuit };
 }
